@@ -1,11 +1,13 @@
 module Main exposing (..)
 
 import Browser
+import Browser.Dom as Dom
 import Browser.Navigation as Nav
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Json.Decode as Decode
+import Task
 import Url
 
 
@@ -37,12 +39,13 @@ type alias Model =
     { title : String
     , amount : Int
     , list : List Expense
+    , error : String
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( Model "" 0 [], Cmd.none )
+    ( Model "" 0 [] "", Cmd.none )
 
 
 
@@ -54,10 +57,13 @@ type Msg
     | HandleInputAmount String
     | HandleKeyDownInput Int
     | HandleClickInsert
+    | HandleEmptyTitle
+    | HandleFormValidate (Result String Model)
+    | InsertExpense
     | None
 
 
-update : Msg -> Model -> ( Model, Cmd msg )
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         HandleInputTitle title ->
@@ -73,16 +79,42 @@ update msg model =
 
         HandleKeyDownInput key ->
             if key == 13 then
-                ( appendAndClearForm model, Cmd.none )
+                update InsertExpense model
 
             else
-                ( model, Cmd.none )
+                ( { model | error = "" }, Cmd.none )
 
         HandleClickInsert ->
-            ( appendAndClearForm model, Cmd.none )
+            update InsertExpense model
+
+        InsertExpense ->
+            update (HandleFormValidate (validateForm model)) model
+
+        HandleFormValidate result ->
+            case result of
+                Err error ->
+                    ( { model | error = error }, Cmd.none )
+
+                Ok _ ->
+                    ( appendAndClearForm model, focusTitle )
+
+        HandleEmptyTitle ->
+            ( model, Cmd.none )
 
         None ->
             ( model, Cmd.none )
+
+
+validateForm : Model -> Result String Model
+validateForm model =
+    if String.isEmpty model.title then
+        Err "타이틀이 비어있습니다. 타이틀을 입력해주세요."
+
+    else if model.amount <= 0 then
+        Err "가격은 0 이상이어야 합니다."
+
+    else
+        Ok model
 
 
 appendAndClearForm : Model -> Model
@@ -98,6 +130,11 @@ appendForms model =
 clearForms : Model -> Model
 clearForms model =
     { model | title = "", amount = 0 }
+
+
+focusTitle : Cmd Msg
+focusTitle =
+    Dom.focus "form-title" |> Task.attempt (\_ -> None)
 
 
 
@@ -121,9 +158,10 @@ view model =
             [ text "📘 Housekeeping Book"
             , small [ style "opacity" ".3", style "margin-left" ".5em" ] [ text "Save Money!!💵" ]
             ]
-        , input [ type_ "text", onInput HandleInputTitle, placeholder "지출 항목 입력", value model.title ] []
+        , input [ id "form-title", type_ "text", onInput HandleInputTitle, onKeyDown HandleKeyDownInput, placeholder "지출 항목 입력", value model.title ] []
         , input [ type_ "number", onInput HandleInputAmount, onKeyDown HandleKeyDownInput, value (String.fromInt model.amount) ] []
         , button [ type_ "button", onClick HandleClickInsert ] [ text "입력" ]
+        , div [] [ text model.error ]
         , div [] (renderLists model.list)
         ]
     }
