@@ -3,6 +3,10 @@ module.exports = {
   module: {
     rules: [
       {
+        test: /\.(sass|scss|css)$/,
+        use: ["style-loader", "css-loader", "sass-loader"],
+      },
+      {
         test: /\.html$/,
         exclude: /node_modules/,
         use: [{ loader: "file-loader", options: { name: "[name].[ext]" } }],

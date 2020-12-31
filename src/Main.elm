@@ -3,6 +3,8 @@ module Main exposing (..)
 import Browser
 import Browser.Dom as Dom
 import Browser.Navigation as Nav
+import Bulma.Classes as B
+import Bulma.Helpers as BHelpers
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
@@ -152,17 +154,114 @@ subscriptions _ =
 
 view : Model -> Browser.Document Msg
 view model =
+    let
+        navBar =
+            nav [ BHelpers.classList [ B.navbar, B.isLink ], attribute "role" "navigation", attribute "ariaLabel" "main navigation" ]
+                [ div [ class B.navbarBrand ]
+                    [ a [ class B.navbarItem, href "/" ]
+                        [ span [ BHelpers.classList [ B.title, B.is3, B.hasTextLight ] ] [ text "📘 Housekeeping Book" ]
+                        ]
+                    ]
+                , div [ class B.navbarEnd ]
+                    [ div [ class B.navbarItem ]
+                        [ div [ class B.buttons ]
+                            [ a [ BHelpers.classList [ B.button, B.isInfo ] ] [ strong [] [ text "Sign up" ] ]
+                            , a [ BHelpers.classList [ B.button, B.isLight ] ] [ strong [] [ text "Log in" ] ]
+                            ]
+                        ]
+                    ]
+                ]
+
+        container children =
+            div [ BHelpers.classList [ B.container, "is-max-widescreen" ] ]
+                [ div [ BHelpers.classList [ B.notification ] ] children ]
+
+        sectionView title subtitle children =
+            section [ class B.section ]
+                [ div [ BHelpers.classList [ B.container, "is-max-widescreen" ] ]
+                    ([ h1 [ class B.title ] [ text title ]
+                     , h2 [ class B.subtitle ] [ text subtitle ]
+                     ]
+                        ++ children
+                    )
+                ]
+
+        formInput inputType labelStr attrs =
+            let
+                inputAttrs =
+                    [ class B.input, type_ inputType ] ++ attrs
+            in
+            div [ class B.field ]
+                [ label [ class B.label ] [ text labelStr ]
+                , div [ class B.control ] [ input inputAttrs [] ]
+                ]
+
+        renderForm =
+            div [ BHelpers.classList [ B.columns, B.isFlex, "is-align-items-flex-end" ] ]
+                [ div [ class B.column ] [ formInput "text" "지출 항목" [ id "form-title", onInput HandleInputTitle, onKeyDown HandleKeyDownInput, value model.title ] ]
+                , div [ class B.column ] [ formInput "number" "지출 금액" [ onInput HandleInputAmount, onKeyDown HandleKeyDownInput, Html.Attributes.min "0", value (String.fromInt model.amount) ] ]
+                , div [ class B.column ] [ button [ BHelpers.classList [ B.button, B.isLink, B.isLight ], type_ "button", onClick HandleClickInsert ] [ text "입력" ] ]
+                ]
+
+        renderError =
+            if String.isEmpty model.error then
+                Html.text ""
+
+            else
+                article [ BHelpers.classList [ B.message, B.isDanger, B.my4 ] ] [ div [ class B.messageBody ] [ text model.error ] ]
+
+        renderTotalAmount =
+            div [ BHelpers.classList [ B.isFlex, "is-justify-content-flex-end" ] ]
+                [ div [ BHelpers.classList [ B.hasTextWeightBold, B.mr6 ] ] [ text "총 합" ]
+                , div [] [ p [ class B.control ] [ text <| "₩ " ++ totalAmount ] ]
+                ]
+
+        totalAmount =
+            model.list
+                |> List.map (\e -> e.amount)
+                |> List.foldr (\a b -> a + b) 0
+                |> String.fromInt
+
+        renderExpenseList =
+            table [ BHelpers.classList [ B.table, B.isInfo, B.isLight, B.isFullwidth ] ]
+                [ thead []
+                    [ tr []
+                        [ th [] [ text "지출 항목" ]
+                        , th [] [ text "지출 금액" ]
+                        ]
+                    ]
+                , model.list
+                    |> List.map renderExpense
+                    |> tbody []
+                ]
+
+        renderExpense expense =
+            tr []
+                [ td [] [ text expense.title ]
+                , td [] [ text <| numbToStringWithComma expense.amount ]
+                ]
+
+        renderEmptyExepnseList =
+            if List.isEmpty model.list then
+                div
+                    [ BHelpers.classList [ B.notification, B.isInfo, B.isLight, B.isFullwidth ] ]
+                    [ text "지출 항목을 입력해 주세요." ]
+
+            else
+                Html.text ""
+    in
     { title = "Initial Page"
     , body =
-        [ h1 []
-            [ text "📘 Housekeeping Book"
-            , small [ style "opacity" ".3", style "margin-left" ".5em" ] [ text "Save Money!!💵" ]
+        [ navBar
+        , sectionView
+            "지출 목록"
+            "지출 항목을 추가하거나 삭제 할 수 있습니다."
+            [ renderForm
+            , renderError
+            , renderTotalAmount
+            , renderExpenseList
+            , renderEmptyExepnseList
             ]
-        , input [ id "form-title", type_ "text", onInput HandleInputTitle, onKeyDown HandleKeyDownInput, placeholder "지출 항목 입력", value model.title ] []
-        , input [ type_ "number", onInput HandleInputAmount, onKeyDown HandleKeyDownInput, value (String.fromInt model.amount) ] []
-        , button [ type_ "button", onClick HandleClickInsert ] [ text "입력" ]
-        , div [] [ text model.error ]
-        , div [] (renderLists model.list)
         ]
     }
 
@@ -172,14 +271,27 @@ onKeyDown tagger =
     on "keydown" (Decode.map tagger keyCode)
 
 
-renderLists : List Expense -> List (Html msg)
-renderLists list =
-    List.map renderExpense list
+splitEveryN : Int -> String -> List String
+splitEveryN n string =
+    if String.length string < n then
+        [ string ] |> List.filter (complement String.isEmpty)
+
+    else
+        let
+            split =
+                String.slice 0 n string
+
+            rest =
+                splitEveryN n (String.slice n (String.length string) string)
+        in
+        ([ split ] ++ rest) |> List.filter (complement String.isEmpty)
 
 
-renderExpense : Expense -> Html msg
-renderExpense expense =
-    div []
-        [ h4 [] [ text expense.title ]
-        , div [] [ text (String.fromInt expense.amount) ]
-        ]
+numbToStringWithComma : Int -> String
+numbToStringWithComma num =
+    "₩ " ++ (num |> String.fromInt |> String.reverse |> splitEveryN 3 |> String.join "," |> String.reverse)
+
+
+complement : (a -> Bool) -> a -> Bool
+complement fn a =
+    not <| fn a
