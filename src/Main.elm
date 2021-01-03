@@ -10,6 +10,7 @@ import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Json.Decode as Decode
 import Task
+import Time
 import Url
 
 
@@ -31,9 +32,14 @@ main =
 -- MODEL
 
 
+type alias DateTuple =
+    ( Time.Zone, Time.Posix )
+
+
 type alias Expense =
     { title : String
     , amount : Int
+    , date : String
     }
 
 
@@ -42,12 +48,14 @@ type alias Model =
     , amount : Int
     , list : List Expense
     , error : String
+    , today : String
+    , date : Maybe String
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( Model "" 0 [] "", Cmd.none )
+    ( Model "" 0 [] "" "" Nothing, clearForm )
 
 
 
@@ -57,17 +65,23 @@ init _ =
 type Msg
     = HandleInputTitle String
     | HandleInputAmount String
+    | HandleInputDate String
     | HandleKeyDownInput Int
     | HandleClickInsert
     | HandleEmptyTitle
     | HandleFormValidate (Result String Model)
     | InsertExpense
+    | ClearForm String
+    | SetToday DateTuple
     | None
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        ClearForm today ->
+            ( { model | title = "", amount = 0, error = "", today = today }, focusTitle )
+
         HandleInputTitle title ->
             ( { model | title = title }, Cmd.none )
 
@@ -79,12 +93,16 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
-        HandleKeyDownInput key ->
-            if key == 13 then
-                update InsertExpense model
+        HandleInputDate date ->
+            ( { model | date = Just date }, Cmd.none )
 
-            else
-                ( { model | error = "" }, Cmd.none )
+        HandleKeyDownInput key ->
+            case key of
+                13 ->
+                    update InsertExpense model
+
+                _ ->
+                    ( { model | error = "" }, Cmd.none )
 
         HandleClickInsert ->
             update InsertExpense model
@@ -98,10 +116,13 @@ update msg model =
                     ( { model | error = error }, Cmd.none )
 
                 Ok _ ->
-                    ( appendAndClearForm model, focusTitle )
+                    ( appendExpense model, clearForm )
 
         HandleEmptyTitle ->
             ( model, Cmd.none )
+
+        SetToday dateTuple ->
+            ( { model | today = dateTupleToString dateTuple }, Cmd.none )
 
         None ->
             ( model, Cmd.none )
@@ -119,24 +140,25 @@ validateForm model =
         Ok model
 
 
-appendAndClearForm : Model -> Model
-appendAndClearForm model =
-    model |> appendForms |> clearForms
-
-
-appendForms : Model -> Model
-appendForms model =
-    { model | list = model.list ++ [ Expense model.title model.amount ] }
-
-
-clearForms : Model -> Model
-clearForms model =
-    { model | title = "", amount = 0 }
+appendExpense : Model -> Model
+appendExpense model =
+    { model | list = model.list ++ [ Expense model.title model.amount (getDate model) ] }
 
 
 focusTitle : Cmd Msg
 focusTitle =
     Dom.focus "form-title" |> Task.attempt (\_ -> None)
+
+
+clearForm : Cmd Msg
+clearForm =
+    getToday |> Task.perform ClearForm
+
+
+getToday : Task.Task Never String
+getToday =
+    Task.map2 Tuple.pair Time.here Time.now
+        |> Task.map dateTupleToString
 
 
 
@@ -197,9 +219,14 @@ view model =
                 ]
 
         renderForm =
+            let
+                date =
+                    Maybe.withDefault model.today model.date
+            in
             div [ BHelpers.classList [ B.columns, B.isFlex, "is-align-items-flex-end" ] ]
                 [ div [ class B.column ] [ formInput "text" "지출 항목" [ id "form-title", onInput HandleInputTitle, onKeyDown HandleKeyDownInput, value model.title ] ]
                 , div [ class B.column ] [ formInput "number" "지출 금액" [ onInput HandleInputAmount, onKeyDown HandleKeyDownInput, Html.Attributes.min "0", value (String.fromInt model.amount) ] ]
+                , div [ class B.column ] [ formInput "date" "날짜" [ onInput HandleInputDate, value date ] ]
                 , div [ class B.column ] [ button [ BHelpers.classList [ B.button, B.isLink, B.isLight ], type_ "button", onClick HandleClickInsert ] [ text "입력" ] ]
                 ]
 
@@ -210,24 +237,25 @@ view model =
             else
                 article [ BHelpers.classList [ B.message, B.isDanger, B.my4 ] ] [ div [ class B.messageBody ] [ text model.error ] ]
 
-        renderTotalAmount =
-            div [ BHelpers.classList [ B.isFlex, "is-justify-content-flex-end" ] ]
-                [ div [ BHelpers.classList [ B.hasTextWeightBold, B.mr6 ] ] [ text "총 합" ]
-                , div [] [ p [ class B.control ] [ text <| "₩ " ++ totalAmount ] ]
-                ]
-
         totalAmount =
             model.list
                 |> List.map (\e -> e.amount)
                 |> List.foldr (\a b -> a + b) 0
-                |> String.fromInt
+                |> numbToStringWithComma
+
+        renderTotalAmount =
+            div [ BHelpers.classList [ B.isFlex, "is-justify-content-flex-end" ] ]
+                [ div [ BHelpers.classList [ B.hasTextWeightBold, B.mr6 ] ] [ text "총 합" ]
+                , div [] [ p [ class B.control ] [ text totalAmount ] ]
+                ]
 
         renderExpenseList =
             table [ BHelpers.classList [ B.table, B.isInfo, B.isLight, B.isFullwidth ] ]
                 [ thead []
                     [ tr []
-                        [ th [] [ text "지출 항목" ]
-                        , th [] [ text "지출 금액" ]
+                        [ th [] [ text "항목" ]
+                        , th [] [ text "금액" ]
+                        , th [] [ text "날짜" ]
                         ]
                     ]
                 , model.list
@@ -239,6 +267,7 @@ view model =
             tr []
                 [ td [] [ text expense.title ]
                 , td [] [ text <| numbToStringWithComma expense.amount ]
+                , td [] [ text expense.date ]
                 ]
 
         renderEmptyExepnseList =
@@ -295,3 +324,75 @@ numbToStringWithComma num =
 complement : (a -> Bool) -> a -> Bool
 complement fn a =
     not <| fn a
+
+
+clearToday : Cmd Msg
+clearToday =
+    Task.perform SetToday (Task.map2 Tuple.pair Time.here Time.now)
+
+
+dateTupleToString : DateTuple -> String
+dateTupleToString ( zone, posixTime ) =
+    let
+        year =
+            Time.toYear zone posixTime |> String.fromInt
+
+        month =
+            Time.toMonth zone posixTime |> monthToString
+
+        day =
+            Time.toDay zone posixTime
+                |> String.fromInt
+                |> String.padLeft 2 '0'
+    in
+    year ++ "-" ++ month ++ "-" ++ day
+
+
+monthToString : Time.Month -> String
+monthToString month =
+    case month of
+        Time.Jan ->
+            "01"
+
+        Time.Feb ->
+            "02"
+
+        Time.Mar ->
+            "03"
+
+        Time.Apr ->
+            "04"
+
+        Time.May ->
+            "05"
+
+        Time.Jun ->
+            "06"
+
+        Time.Jul ->
+            "07"
+
+        Time.Aug ->
+            "08"
+
+        Time.Sep ->
+            "09"
+
+        Time.Oct ->
+            "10"
+
+        Time.Nov ->
+            "11"
+
+        Time.Dec ->
+            "12"
+
+
+getDate : Model -> String
+getDate model =
+    case model.date of
+        Just date ->
+            date
+
+        Nothing ->
+            model.today
